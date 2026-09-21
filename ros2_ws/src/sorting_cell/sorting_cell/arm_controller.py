@@ -41,7 +41,7 @@ class ArmCommandParser:
     Never crashes on malformed or out-of-range input.
     """
 
-    SUPPORTED_JOINTS = ("BASE", "SHOULDER", "ELBOW", "WRIST")
+    SUPPORTED_JOINTS = ("BASE", "SHOULDER", "ELBOW", "WRIST", "WRIST_PITCH")
     VALID_GRIPPER_STATES = ("OPEN", "CLOSE")
 
     def __init__(self, joint_limits: Optional[Dict[str, JointRange]] = None) -> None:
@@ -57,6 +57,7 @@ class ArmCommandParser:
             "SHOULDER": JointRange(min_angle=15.0, max_angle=165.0),
             "ELBOW": JointRange(min_angle=15.0, max_angle=165.0),
             "WRIST": JointRange(min_angle=0.0, max_angle=180.0),
+            "WRIST_PITCH": JointRange(min_angle=0.0, max_angle=180.0),
         }
 
     def update_joint_limit(self, joint_name: str, min_angle: float, max_angle: float) -> None:
@@ -98,7 +99,8 @@ class ArmCommandParser:
                 return False, None, None, f"INVALID_GRIPPER_STATE:{tokens[1]}"
             return True, f"GRIPPER:{state}", "GRIPPER", None
 
-        # 3. Joint angle commands: BASE <angle>, SHOULDER <angle>, ELBOW <angle>, WRIST <angle>
+        # 3. Joint angle commands: BASE <angle>, SHOULDER <angle>, ELBOW <angle>,
+        #    WRIST <angle>, WRIST_PITCH <angle>
         if verb in self.SUPPORTED_JOINTS:
             if len(tokens) != 2:
                 return False, None, None, f"MISSING_OR_EXTRA_ANGLE_ARGUMENT_FOR_{verb}"
@@ -223,12 +225,15 @@ class ArmControllerNode(Node):
         self.declare_parameter('joint_limits.elbow.max', 165.0)
         self.declare_parameter('joint_limits.wrist.min', 0.0)
         self.declare_parameter('joint_limits.wrist.max', 180.0)
+        self.declare_parameter('joint_limits.wrist_pitch.min', 0.0)
+        self.declare_parameter('joint_limits.wrist_pitch.max', 180.0)
 
         # Configurable home position placeholders (to be calibrated by hardware team)
         self.declare_parameter('home_positions.base', 90.0)
         self.declare_parameter('home_positions.shoulder', 90.0)
         self.declare_parameter('home_positions.elbow', 90.0)
         self.declare_parameter('home_positions.wrist', 90.0)
+        self.declare_parameter('home_positions.wrist_pitch', 90.0)
 
         # Retrieve parameters
         self.mock_mode = self.get_parameter('mock_mode').get_parameter_value().bool_value
@@ -253,6 +258,10 @@ class ArmControllerNode(Node):
             "WRIST": JointRange(
                 self.get_parameter('joint_limits.wrist.min').get_parameter_value().double_value,
                 self.get_parameter('joint_limits.wrist.max').get_parameter_value().double_value,
+            ),
+            "WRIST_PITCH": JointRange(
+                self.get_parameter('joint_limits.wrist_pitch.min').get_parameter_value().double_value,
+                self.get_parameter('joint_limits.wrist_pitch.max').get_parameter_value().double_value,
             ),
         }
 

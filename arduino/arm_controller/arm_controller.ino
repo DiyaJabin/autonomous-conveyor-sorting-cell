@@ -48,12 +48,6 @@ const unsigned long SERIAL_BAUD_RATE = 115200;
 // Servo PWM frequency (50 Hz = standard 20ms period for analog & digital RC servos)
 const float SERVO_PWM_FREQ = 50.0;
 
-// PCA9685 12-bit PWM pulse width boundaries (4096 counts = 20ms period at 50Hz)
-// Standard RC servo pulse: ~1.0ms (min) to ~2.0ms (max), or ~0.5ms to ~2.5ms extended.
-// NOTE: These are uncalibrated software defaults; hardware team must calibrate for each joint.
-const uint16_t DEFAULT_PULSE_MIN = 102;
-const uint16_t DEFAULT_PULSE_MAX = 512;
-
 // PCA9685 Channel Assignments
 const uint8_t CH_BASE        = 0;
 const uint8_t CH_SHOULDER    = 1;
@@ -61,6 +55,24 @@ const uint8_t CH_ELBOW       = 2;
 const uint8_t CH_WRIST_ROLL  = 3;
 const uint8_t CH_WRIST_PITCH = 4;
 const uint8_t CH_CLAW        = 5;
+
+// PCA9685 12-bit PWM pulse width boundaries (4096 counts = 20ms period at 50Hz).
+// Per-channel calibration measured by the hardware team for each physical
+// servo (MIN/MID/MAX pulse counts). Array index == PCA9685 channel number.
+struct ServoCalibration {
+    uint16_t pulseMin;
+    uint16_t pulseMid;
+    uint16_t pulseMax;
+};
+
+const ServoCalibration SERVO_CALIBRATION[6] = {
+    /* CH0 Base        MG996R */ {100, 310, 520},
+    /* CH1 Shoulder    MG996R */ {100, 310, 520},
+    /* CH2 Elbow       MG996R */ {100, 310, 520},
+    /* CH3 Wrist Roll  MG90S  */ { 87, 313, 538},
+    /* CH4 Wrist Pitch MG90S  */ { 87, 313, 538},
+    /* CH5 Gripper     MG90S  */ { 87, 311, 535},
+};
 
 // Home Position Angles
 const float HOME_ANGLE_BASE        = 0.0;
@@ -70,8 +82,8 @@ const float HOME_ANGLE_WRIST_ROLL  = 0.0;
 const float HOME_ANGLE_WRIST_PITCH = 0.0;
 
 // Gripper Angular Setpoints
-const float GRIPPER_OPEN_ANGLE  = 30.0;
-const float GRIPPER_CLOSE_ANGLE = 90.0;
+const float GRIPPER_OPEN_ANGLE  = 150.0;
+const float GRIPPER_CLOSE_ANGLE = 30.0;
 
 // Serial buffer configuration
 const size_t BUFFER_SIZE = 64;
@@ -89,13 +101,22 @@ bool isAngleWithinLimits(float angle, float minAngle, float maxAngle)
 
 uint16_t angleToPwmCount(
     float angle,
-    float minAngle = 0.0,
-    float maxAngle = 180.0,
-    uint16_t minPwm = DEFAULT_PULSE_MIN,
-    uint16_t maxPwm = DEFAULT_PULSE_MAX
+    float minAngle,
+    float maxAngle,
+    const ServoCalibration &cal
 ) {
-    float ratio = (angle - minAngle) / (maxAngle - minAngle);
-    return (uint16_t)(minPwm + ratio * (maxPwm - minPwm) + 0.5);
+    // Piecewise-linear through the calibrated MID point (not just MIN/MAX),
+    // so per-servo calibration data is honored even if a joint's true pulse
+    // response is not perfectly symmetric between its two halves.
+    float midAngle = (minAngle + maxAngle) / 2.0;
+
+    if (angle <= midAngle) {
+        float ratio = (angle - minAngle) / (midAngle - minAngle);
+        return (uint16_t)(cal.pulseMin + ratio * (cal.pulseMid - cal.pulseMin) + 0.5);
+    } else {
+        float ratio = (angle - midAngle) / (maxAngle - midAngle);
+        return (uint16_t)(cal.pulseMid + ratio * (cal.pulseMax - cal.pulseMid) + 0.5);
+    }
 }
 
 bool setServoAngle(
@@ -112,7 +133,8 @@ bool setServoAngle(
     uint16_t pwmVal = angleToPwmCount(
         angle,
         minAngle,
-        maxAngle
+        maxAngle,
+        SERVO_CALIBRATION[channel]
     );
 
     pwm.setPWM(channel, 0, pwmVal);
@@ -254,6 +276,14 @@ void processCommand(char* cmd) {
 
         if (setServoAngle(CH_WRIST_ROLL, angle, MIN_ANGLE, MAX_ANGLE)) {
             Serial.println(F("OK:WRIST"));
+        } else {
+            Serial.println(F("ERROR:INVALID_COMMAND"));
+        }
+
+    } else if (strcmp(target, "WRIST_PITCH") == 0) {
+
+        if (setServoAngle(CH_WRIST_PITCH, angle, MIN_ANGLE, MAX_ANGLE)) {
+            Serial.println(F("OK:WRIST_PITCH"));
         } else {
             Serial.println(F("ERROR:INVALID_COMMAND"));
         }

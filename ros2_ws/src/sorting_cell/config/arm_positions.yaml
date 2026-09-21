@@ -1,0 +1,87 @@
+# =====================================================================================
+# Named arm positions used by sorting_controller
+# =====================================================================================
+# These are REAL MEASURED VALUES from physical arm testing, not placeholders,
+# EXCEPT where a position is explicitly marked UNVERIFIED below. They remain
+# specific to THIS cell's physical layout (pickup area, fixed PN532 reader
+# position, bin layout). Re-verify on the arm before reusing this file for a
+# different physical setup.
+#
+# Physical cell layout (see project notes):
+#   - Pickup area: directly in front of the arm.
+#   - PN532 RFID reader: fixed to the LEFT of the arm. The arm carries a
+#     gripped object over this fixed reader (RFID_SCAN_POSITION) to identify
+#     it -- the reader itself never moves.
+#   - Bins A/B/C: fixed to the RIGHT of the arm.
+#
+# Each position lists an angle (degrees) for BASE, SHOULDER, ELBOW, WRIST, and
+# WRIST_PITCH, matching the existing /arm/command joint commands. Gripper
+# OPEN/CLOSE is issued separately by sorting_controller at pick/place time and
+# is not part of a position.
+# =====================================================================================
+
+positions:
+  # This is the pickup-hover/approach pose (NOT an all-zeros neutral -- that
+  # all-zeros baseline is now only arm_controller.ino's own firmware-level
+  # HOME command, a separate lower-level safety baseline that this ROS-level
+  # HOME_POSITION does not touch or replace). The pick sequence moves here
+  # first, descends to PICK_DOWN_POSITION to grip, then returns here before
+  # continuing to RFID_SCAN_POSITION. It is also where the sequencing logic
+  # in sorting_controller.py now sends the arm on cycle end and on
+  # fault-recovery.
+  #
+  # CAUTION -- PROVISIONAL: elbow=170 has been measured to work but is
+  # mechanically unstable at this extension -- the arm tends to fall without
+  # support. Treat this value as provisional pending a safer verified angle;
+  # do not leave the arm unattended at this position.
+  HOME_POSITION:
+    base: 0
+    shoulder: 120
+    elbow: 170
+    wrist: 80
+    wrist_pitch: 10
+
+  # CAUTION -- UNVERIFIED: elbow=175 is a starting estimate for the actual
+  # grip point, NOT yet physically confirmed on real hardware. Verify on the
+  # arm before relying on this position for an unattended pick.
+  # Same base/shoulder/wrist/wrist_pitch as HOME_POSITION (the hover pose
+  # directly above this point); elbow is extended slightly further to reach
+  # the grip point.
+  PICK_DOWN_POSITION:
+    base: 0
+    shoulder: 120
+    elbow: 175
+    wrist: 80
+    wrist_pitch: 10
+
+  # CAUTION -- PROVISIONAL: elbow=170 has been measured to work but is
+  # mechanically unstable at this extension -- the arm tends to fall without
+  # support. Treat this value as provisional pending a safer verified angle;
+  # do not leave the arm unattended at this position.
+  RFID_SCAN_POSITION:
+    base: 45
+    shoulder: 110
+    elbow: 170
+    wrist: 80
+    wrist_pitch: 0
+
+  BIN_A_POSITION:
+    base: 60
+    shoulder: 90
+    elbow: 160
+    wrist: 90
+    wrist_pitch: 20
+
+  BIN_B_POSITION:
+    base: 90
+    shoulder: 100
+    elbow: 160
+    wrist: 80
+    wrist_pitch: 20
+
+  BIN_C_POSITION:
+    base: 120
+    shoulder: 90
+    elbow: 160
+    wrist: 90
+    wrist_pitch: 20

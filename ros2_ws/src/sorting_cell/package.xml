@@ -16,8 +16,19 @@
   <test_depend>pytest</test_depend>
 
   <exec_depend>python3-serial</exec_depend>
+  <exec_depend>python3-yaml</exec_depend>
+  <exec_depend>ament_index_python</exec_depend>
   <exec_depend>launch</exec_depend>
   <exec_depend>launch_ros</exec_depend>
+
+  <!--
+    The real (mock_mode:=false) PN532 RFID backend in rfid_reader.py needs
+    adafruit-blinka and adafruit-circuitpython-pn532. These are pip-only
+    CircuitPython hardware libraries with no rosdep/apt key, so they are
+    intentionally not declared as <exec_depend> above (that would break
+    `rosdep install`). Install them with `pip3 install -r requirements.txt`
+    from this package's directory on the Raspberry Pi.
+  -->
 
   <export>
     <build_type>ament_python</build_type>

@@ -1,0 +1,43 @@
+<launch>
+  <!-- Arm / serial configuration (passed through to arm_controller) -->
+  <arg name="mock_mode" default="false" description="Run arm_controller and rfid_reader without physical hardware"/>
+  <arg name="serial_port" default="/dev/ttyACM0" description="Arduino serial device"/>
+  <arg name="baud_rate" default="115200" description="Serial communication baud rate"/>
+  <arg name="serial_timeout" default="1.0" description="Serial read timeout in seconds"/>
+
+  <!-- Sorting configuration -->
+  <arg name="object_map_path" default="" description="Override path to object_map.yaml (defaults to installed config)"/>
+  <arg name="positions_path" default="" description="Override path to arm_positions.yaml (defaults to installed config)"/>
+  <arg name="arm_command_timeout" default="5.0" description="Seconds to wait for /arm/status before treating a command as failed"/>
+  <arg name="rfid_timeout" default="15.0" description="Seconds to wait for /rfid/tag once parked at RFID_SCAN_POSITION before aborting the cycle"/>
+
+  <node
+    pkg="sorting_cell"
+    exec="arm_controller"
+    name="arm_controller"
+    output="screen">
+    <param name="mock_mode" value="$(var mock_mode)"/>
+    <param name="serial_port" value="$(var serial_port)"/>
+    <param name="baud_rate" value="$(var baud_rate)"/>
+    <param name="serial_timeout" value="$(var serial_timeout)"/>
+  </node>
+
+  <node
+    pkg="sorting_cell"
+    exec="rfid_reader"
+    name="rfid_reader"
+    output="screen">
+    <param name="mock_mode" value="$(var mock_mode)"/>
+  </node>
+
+  <node
+    pkg="sorting_cell"
+    exec="sorting_controller"
+    name="sorting_controller"
+    output="screen">
+    <param name="object_map_path" value="$(var object_map_path)"/>
+    <param name="positions_path" value="$(var positions_path)"/>
+    <param name="arm_command_timeout" value="$(var arm_command_timeout)"/>
+    <param name="rfid_timeout" value="$(var rfid_timeout)"/>
+  </node>
+</launch>
