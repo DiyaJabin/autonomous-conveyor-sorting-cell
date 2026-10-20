@@ -96,7 +96,7 @@ Ubuntu 22.04 Laptop (ROS 2 Humble)
 |---|---|---|---|---|
 | `0` | Base | MG996R | `0° – 180°`, Home: `90°` | *TBD by Hardware Team* |
 | `1` | Shoulder | MG996R | `15° – 165°`, Home: `90°` | *TBD by Hardware Team* |
-| `2` | Elbow | MG996R | `15° – 165°`, Home: `90°` | *TBD by Hardware Team* |
+| `2` | Elbow | MG996R | `15° – 175°`, Home: `90°` | *TBD by Hardware Team* |
 | `3` | Wrist | MG90S / MG996R | `0° – 180°`, Home: `90°` | *TBD by Hardware Team* |
 | `4` | Gripper | MG90S | Open: `30°`, Close: `90°` | *TBD by Hardware Team* |
 | `5` | Spare / Aux | MG90S | Home: `90°` | *TBD by Hardware Team* |

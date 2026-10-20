@@ -55,7 +55,9 @@ class ArmCommandParser:
         self.joint_limits: Dict[str, JointRange] = joint_limits or {
             "BASE": JointRange(min_angle=0.0, max_angle=180.0),
             "SHOULDER": JointRange(min_angle=15.0, max_angle=165.0),
-            "ELBOW": JointRange(min_angle=15.0, max_angle=165.0),
+            # ELBOW max widened to 175.0 to admit the measured positions in
+            # config/arm_positions.yaml (PICK_DOWN/RFID_SCAN elbow=175).
+            "ELBOW": JointRange(min_angle=15.0, max_angle=175.0),
             "WRIST": JointRange(min_angle=0.0, max_angle=180.0),
             "WRIST_PITCH": JointRange(min_angle=0.0, max_angle=180.0),
         }
@@ -222,7 +224,8 @@ class ArmControllerNode(Node):
         self.declare_parameter('joint_limits.shoulder.min', 15.0)
         self.declare_parameter('joint_limits.shoulder.max', 165.0)
         self.declare_parameter('joint_limits.elbow.min', 15.0)
-        self.declare_parameter('joint_limits.elbow.max', 165.0)
+        # elbow.max must cover the measured positions in config/arm_positions.yaml.
+        self.declare_parameter('joint_limits.elbow.max', 175.0)
         self.declare_parameter('joint_limits.wrist.min', 0.0)
         self.declare_parameter('joint_limits.wrist.max', 180.0)
         self.declare_parameter('joint_limits.wrist_pitch.min', 0.0)

@@ -19,7 +19,9 @@ except ImportError:
 REQUIRED_POSITION_NAMES = (
     "HOME_POSITION",
     "PICK_DOWN_POSITION",
+    "LIFT_POSITION",
     "RFID_SCAN_POSITION",
+    "FLOATING_POSITION",
 )
 
 REQUIRED_JOINTS = ("base", "shoulder", "elbow", "wrist")

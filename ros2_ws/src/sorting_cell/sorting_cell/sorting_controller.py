@@ -4,14 +4,15 @@ Sequences the MVP flow (matches the actual physical cell layout: pickup area
 in front of the arm, PN532 RFID reader fixed to the LEFT, bins fixed to the
 RIGHT -- the arm carries the object to the reader, not the other way round):
 
-  cycle start -> move to HOME_POSITION (pickup-hover pose)
-  -> move to PICK_DOWN_POSITION -> grip -> move back to HOME_POSITION
-  -> move to RFID scan position -> wait for RFID detection
-  -> identify object -> decide bin -> move to bin -> release -> report
+  cycle start -> move to HOME_POSITION -> open gripper
+  -> move to PICK_DOWN_POSITION -> grip -> move to LIFT_POSITION
+  -> move to RFID scan position
+  -> wait for RFID detection -> identify object -> decide bin
+  -> move to FLOATING_POSITION -> move to bin -> release -> report
   -> move to HOME_POSITION -> idle
 
   NOTE: HOME_POSITION here is a ROS-level named joint target (the
-  pickup-hover pose above the grip point), not the all-zeros baseline.
+  cycle start/end pose), not the all-zeros baseline.
   That all-zeros baseline still exists, but only as arm_controller.ino's
   own firmware-level HOME command -- a separate, lower-level safety
   baseline that this node no longer sends and does not replace.
@@ -31,9 +32,22 @@ Publishes to /arm/command (joint/gripper/home commands) and /sorting/status
 The sequencing logic (SortingControllerCore) is deliberately decoupled from
 rclpy so it can be fully unit tested with fake command senders and a fake
 RFID wait function, without any ROS 2 runtime or hardware.
+
+Settle waits: the Arduino replies OK:<JOINT> as soon as it has accepted a
+servo target, before the servo has physically moved, so an OK only means
+"command accepted". After each named-position move, each gripper action,
+and on arrival at RFID_SCAN_POSITION, the core therefore sleeps for a
+configurable settle time so the arm has actually arrived (e.g. is really at
+PICK_DOWN_POSITION before the gripper closes, and the gripper has really
+closed before the arm lifts). Within a position move, the core also waits
+joint_gap_seconds after each joint command except the last, so joints move
+one at a time instead of all starting together (which makes the loaded
+joints fall short on the real arm). The sleep function is injectable so
+tests run instantly.
 """
 
 import threading
+import time
 from pathlib import Path
 from typing import Callable, Dict, Optional, Tuple
 
@@ -62,7 +76,13 @@ class SortingControllerCore:
     """
 
     # Positions required before a cycle can even attempt to start.
-    STARTUP_REQUIRED_POSITIONS = ("HOME_POSITION", "PICK_DOWN_POSITION", "RFID_SCAN_POSITION")
+    STARTUP_REQUIRED_POSITIONS = (
+        "HOME_POSITION",
+        "PICK_DOWN_POSITION",
+        "LIFT_POSITION",
+        "RFID_SCAN_POSITION",
+        "FLOATING_POSITION",
+    )
 
     def __init__(
         self,
@@ -73,6 +93,11 @@ class SortingControllerCore:
         report_status: Optional[Callable[[str], None]] = None,
         logger: Optional[Callable[[str], None]] = None,
         rfid_timeout: float = 15.0,
+        move_settle_seconds: float = 2.0,
+        gripper_settle_seconds: float = 1.0,
+        rfid_settle_seconds: float = 0.5,
+        joint_gap_seconds: float = 0.6,
+        sleep: Callable[[float], None] = time.sleep,
     ) -> None:
         """
         :param object_map: UID -> object/bin lookup.
@@ -86,7 +111,27 @@ class SortingControllerCore:
         :param logger: optional logging callable.
         :param rfid_timeout: seconds to wait for an RFID detection once the
                arm is parked at RFID_SCAN_POSITION, before giving up.
+        :param move_settle_seconds: seconds to wait after every named-position
+               move has been acknowledged, so the servos physically arrive.
+        :param gripper_settle_seconds: seconds to wait after GRIPPER OPEN /
+               GRIPPER CLOSE has been acknowledged.
+        :param rfid_settle_seconds: extra seconds to wait after arriving at
+               RFID_SCAN_POSITION (on top of move_settle_seconds) before
+               starting to wait for a tag.
+        :param joint_gap_seconds: seconds to wait after each joint command
+               within a position move, before sending the next joint. Not
+               applied after the last joint (move_settle_seconds covers it)
+               or to gripper commands. 0 sends joints back to back.
+        :param sleep: blocking sleep function; injectable so tests run instantly.
         """
+        for name, value in (
+            ("move_settle_seconds", move_settle_seconds),
+            ("gripper_settle_seconds", gripper_settle_seconds),
+            ("rfid_settle_seconds", rfid_settle_seconds),
+            ("joint_gap_seconds", joint_gap_seconds),
+        ):
+            if value < 0:
+                raise ValueError(f"{name} must be >= 0, got {value}")
         self.object_map = object_map
         self.positions = positions
         self.send_arm_command = send_arm_command
@@ -94,6 +139,11 @@ class SortingControllerCore:
         self._report_status = report_status or (lambda status: None)
         self._logger = logger or (lambda msg: None)
         self.rfid_timeout = rfid_timeout
+        self.move_settle_seconds = move_settle_seconds
+        self.gripper_settle_seconds = gripper_settle_seconds
+        self.rfid_settle_seconds = rfid_settle_seconds
+        self.joint_gap_seconds = joint_gap_seconds
+        self.sleep = sleep
         self.status_history = []
 
     def report_status(self, status_text: str) -> None:
@@ -104,16 +154,23 @@ class SortingControllerCore:
         self._logger(msg)
 
     def _send_position(self, position: ArmPosition, label: str) -> Optional[str]:
-        for cmd in position.as_commands():
+        commands = position.as_commands()
+        for index, cmd in enumerate(commands):
             success, status = self.send_arm_command(cmd)
             if not success:
                 return f"ERROR:ARM_FAILURE:{label}:{cmd}:{status}"
+            # Move joints one at a time; the settle below covers the last one.
+            if self.joint_gap_seconds > 0 and index < len(commands) - 1:
+                self.sleep(self.joint_gap_seconds)
+        # OK only means the targets were accepted; give the servos time to arrive.
+        self.sleep(self.move_settle_seconds)
         return None
 
     def _send_gripper(self, state: str, label: str) -> Optional[str]:
         success, status = self.send_arm_command(f"GRIPPER {state}")
         if not success:
             return f"ERROR:ARM_FAILURE:{label}:{status}"
+        self.sleep(self.gripper_settle_seconds)
         return None
 
     def _fail(self, reason: str) -> str:
@@ -125,7 +182,7 @@ class SortingControllerCore:
         would drop it uncontrolled. Homing with the gripper as-is is the
         safer default until a human inspects the cell.
 
-        "HOME" here means the ROS-level HOME_POSITION (pickup-hover pose),
+        "HOME" here means the ROS-level HOME_POSITION (cycle start/end pose),
         via the same joint-command path as any other named position --
         NOT arm_controller.ino's own all-zeros firmware HOME command, which
         this node no longer sends. If HOME_POSITION itself is undefined
@@ -160,6 +217,12 @@ class SortingControllerCore:
         if error:
             return self._fail(error)
 
+        # Make sure the gripper is open before descending onto the object.
+        self.report_status("EXECUTING:OPEN_GRIPPER")
+        error = self._send_gripper("OPEN", "OPEN_GRIPPER")
+        if error:
+            return self._fail(error)
+
         self.report_status("EXECUTING:MOVE_TO_PICK_DOWN_POSITION")
         error = self._send_position(self.positions["PICK_DOWN_POSITION"], "MOVE_TO_PICK_DOWN_POSITION")
         if error:
@@ -170,8 +233,10 @@ class SortingControllerCore:
         if error:
             return self._fail(error)
 
-        self.report_status("EXECUTING:RETURN_TO_HOME_POSITION")
-        error = self._send_position(self.positions["HOME_POSITION"], "RETURN_TO_HOME_POSITION")
+        # Lift the gripped object clear of the pickup area before swinging
+        # it over to the reader.
+        self.report_status("EXECUTING:LIFT_AFTER_GRIP")
+        error = self._send_position(self.positions["LIFT_POSITION"], "LIFT_AFTER_GRIP")
         if error:
             return self._fail(error)
 
@@ -179,6 +244,9 @@ class SortingControllerCore:
         error = self._send_position(self.positions["RFID_SCAN_POSITION"], "MOVE_TO_RFID_SCAN")
         if error:
             return self._fail(error)
+
+        # Let the held object stop swinging over the reader before scanning.
+        self.sleep(self.rfid_settle_seconds)
 
         self.report_status("WAITING_FOR_RFID")
         uid = self.wait_for_rfid_tag(self.rfid_timeout)
@@ -198,6 +266,11 @@ class SortingControllerCore:
         if bin_position_name not in self.positions:
             return self._fail(f"ERROR:INVALID_CONFIGURATION:MISSING_POSITION:{bin_position_name}")
 
+        self.report_status("EXECUTING:MOVE_TO_FLOATING")
+        error = self._send_position(self.positions["FLOATING_POSITION"], "MOVE_TO_FLOATING")
+        if error:
+            return self._fail(error)
+
         self.report_status(f"EXECUTING:MOVE_TO_BIN:{record.bin_name}")
         error = self._send_position(self.positions[bin_position_name], f"MOVE_TO_BIN:{record.bin_name}")
         if error:
@@ -210,7 +283,7 @@ class SortingControllerCore:
 
         self.report_status(f"REPORT:SORTED:{uid}:{record.object_name}:{record.bin_name}")
 
-        # "HOME" here is the ROS-level HOME_POSITION (pickup-hover pose), not
+        # "HOME" here is the ROS-level HOME_POSITION (cycle start/end pose), not
         # arm_controller.ino's own all-zeros firmware HOME command -- see the
         # module docstring and _fail() for why those are no longer the same.
         error = self._send_position(self.positions["HOME_POSITION"], "HOME")
@@ -235,11 +308,27 @@ class SortingControllerNode(Node):
         self.declare_parameter('positions_path', '')
         self.declare_parameter('arm_command_timeout', 5.0)
         self.declare_parameter('rfid_timeout', 15.0)
+        self.declare_parameter('move_settle_seconds', 2.0)
+        self.declare_parameter('gripper_settle_seconds', 1.0)
+        self.declare_parameter('rfid_settle_seconds', 0.5)
+        self.declare_parameter('joint_gap_seconds', 0.6)
 
         self.arm_command_timeout = self.get_parameter(
             'arm_command_timeout'
         ).get_parameter_value().double_value
         self.rfid_timeout = self.get_parameter('rfid_timeout').get_parameter_value().double_value
+        self.move_settle_seconds = self.get_parameter(
+            'move_settle_seconds'
+        ).get_parameter_value().double_value
+        self.gripper_settle_seconds = self.get_parameter(
+            'gripper_settle_seconds'
+        ).get_parameter_value().double_value
+        self.rfid_settle_seconds = self.get_parameter(
+            'rfid_settle_seconds'
+        ).get_parameter_value().double_value
+        self.joint_gap_seconds = self.get_parameter(
+            'joint_gap_seconds'
+        ).get_parameter_value().double_value
 
         object_map_path = self._resolve_config_path('object_map_path', 'object_map.yaml')
         positions_path = self._resolve_config_path('positions_path', 'arm_positions.yaml')
@@ -294,6 +383,10 @@ class SortingControllerNode(Node):
             report_status=self._publish_sorting_status,
             logger=lambda msg: self.get_logger().info(msg),
             rfid_timeout=self.rfid_timeout,
+            move_settle_seconds=self.move_settle_seconds,
+            gripper_settle_seconds=self.gripper_settle_seconds,
+            rfid_settle_seconds=self.rfid_settle_seconds,
+            joint_gap_seconds=self.joint_gap_seconds,
         )
 
         # Cycle triggers ("object is present at pickup") are handled on a

@@ -1,29 +1,30 @@
 # =====================================================================================
 # RFID UID -> Object -> Bin mapping
 # =====================================================================================
-# PLACEHOLDER CONFIGURATION -- these UIDs are NOT real. They exist only so the
-# sorting_controller / rfid_reader software can be exercised end-to-end (in
-# mock mode) before the real PN532 reader and NTAG213 stickers are scanned.
-#
-# When real UIDs are available:
-#   1. Scan each NTAG213 sticker with the PN532 and record the UID exactly as
-#      reported (uppercase hex string, no separators, e.g. "04A224B2D95E80").
-#   2. Replace the placeholder keys below with the real UIDs.
-#   3. Do NOT leave any UID_PLACEHOLDER_* entries in a production config.
+# Real NTAG213 UIDs, as reported by the PN532 (uppercase hex string, no
+# separators). Several UIDs may map to the same bin.
 #
 # "bin" must match a *_POSITION name defined in arm_positions.yaml (minus the
 # _POSITION suffix), e.g. bin: BIN_A -> BIN_A_POSITION.
 # =====================================================================================
 
 objects:
-  UID_PLACEHOLDER_0001:
-    object_name: OBJECT_A
+  1DF058BA141080:
+    object_name: OBJECT_A2
     bin: BIN_A
 
-  1DEA58BA141080:
-    object_name: OBJECT_B
+  1DEF58BA141080:
+    object_name: OBJECT_A3
+    bin: BIN_A
+
+  1DEC58BA141080:
+    object_name: OBJECT_B2
     bin: BIN_B
 
-  1DEB58BA141080:
-    object_name: OBJECT_C
-    bin: BIN_C
+  1DEE58BA141080:
+    object_name: OBJECT_B3
+    bin: BIN_B
+
+  1DED58BA141080:
+    object_name: OBJECT_B4
+    bin: BIN_B

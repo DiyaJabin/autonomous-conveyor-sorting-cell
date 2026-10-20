@@ -580,3 +580,21 @@ class TestArmControllerCoreIntegration:
             assert ctrl.status_history == ["EXECUTING:BASE", "ERROR:INVALID_COMMAND"]
             assert final_status == "ERROR:INVALID_COMMAND"
 
+
+
+class TestShippedPositionsWithinDefaultLimits:
+    """Every measured position in config/arm_positions.yaml must pass the default
+    ArmCommandParser limits, or the real arm rejects it at runtime."""
+
+    def test_all_shipped_positions_pass_default_limits(self):
+        from sorting_cell.positions import load_positions
+
+        positions = load_positions(str(pkg_root / "config" / "arm_positions.yaml"))
+        parser = ArmCommandParser()
+        failures = []
+        for name, position in positions.items():
+            for command in position.as_commands():
+                is_valid, _, _, error = parser.parse(command)
+                if not is_valid:
+                    failures.append(f"{name}: '{command}' -> {error}")
+        assert not failures, "\n".join(failures)

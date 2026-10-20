@@ -83,7 +83,7 @@ const float HOME_ANGLE_WRIST_PITCH = 0.0;
 
 // Gripper Angular Setpoints
 const float GRIPPER_OPEN_ANGLE  = 150.0;
-const float GRIPPER_CLOSE_ANGLE = 30.0;
+const float GRIPPER_CLOSE_ANGLE = 20.0;
 
 // Serial buffer configuration
 const size_t BUFFER_SIZE = 64;
