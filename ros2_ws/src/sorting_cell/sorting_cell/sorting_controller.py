@@ -366,8 +366,12 @@ class SortingControllerNode(Node):
         # the executor thread), waited on from the worker thread below. This
         # mirrors the /arm/status pattern above (including the lock) so the
         # executor is never blocked and stays free to deliver both
-        # /arm/status and /rfid/tag while a cycle is mid-sequence, and a
-        # detection can never be lost to the same race.
+        # /arm/status and /rfid/tag while a cycle is mid-sequence.
+        # _wait_for_rfid_tag() clears any earlier detection when it starts,
+        # so a tag published before WAITING_FOR_RFID (e.g. during the move
+        # to the scan pose or its settle waits) is discarded. rfid_reader
+        # does not republish a tag that stays in the field, so in that case
+        # the wait can end in ERROR:RFID_TIMEOUT.
         self._rfid_lock = threading.Lock()
         self._rfid_event = threading.Event()
         self._latest_rfid_uid: Optional[str] = None

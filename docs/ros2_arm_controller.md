@@ -1,152 +1,188 @@
-# ROS 2 Arm Controller: Subsystem Specification & Status Guide
+# ROS 2 Arm Controller and Sorting Sequence
 
-This document details the ROS 2 software architecture, topic interfaces, serial protocol, error handling, and verification status for the robotic arm subsystem in the **Autonomous Conveyor-Based Robotic Sorting Cell** (Review 2).
+The ROS 2 side of the sorting cell (package `sorting_cell`, ROS 2 Jazzy on
+Ubuntu 24.04, Raspberry Pi 4): the `arm_controller` node that talks to the
+Arduino, and how `sorting_controller` drives it through a cycle. The
+README has the full node, topic and parameter tables.
 
 ---
 
-## 1. Subsystem Architecture
+## 1. Structure
 
 ```
-                   ROS 2 Humble (Ubuntu 22.04)
-┌──────────────────────────────────────────────────────────────┐
-│  /arm/command (std_msgs/msg/String)                          │
-│        │                                                     │
-│        ▼                                                     │
-│  [arm_controller node]                                       │
-│        ├── ArmCommandParser (validation & configurable limits)│
-│        ├── ArmControllerCore (orchestration & status)        │
-│        └── SerialInterface (pyserial & mock mode)            │
-│        │                                                     │
-│        ▼                                                     │
-│  /arm/status (std_msgs/msg/String)                           │
-└──────────────────────────────────────────────────────────────┘
-                         │
-                         │ USB Serial (115200 baud, 8N1, '\n')
-                         ▼
-┌──────────────────────────────────────────────────────────────┐
-│  [Arduino Uno]                                               │
-│        │                                                     │
-│        │ I2C (50 Hz PWM)                                     │
-│        ▼                                                     │
-│  [Adafruit PCA9685 16-Channel 12-Bit PWM Driver]             │
-│        │                                                     │
-│        ▼                                                     │
-│  6× RC Servos (3× MG996R + 3× MG90S)                         │
-└──────────────────────────────────────────────────────────────┘
+/arm/command (std_msgs/String)
+      │
+      ▼
+arm_controller node                      sorting_cell/arm_controller.py
+  ├── ArmCommandParser   syntax + joint-limit checks, ROS → wire format
+  ├── ArmControllerCore  EXECUTING / OK / ERROR status flow
+  └── SerialInterface    pyserial or mock, 2 s boot delay   serial_interface.py
+      │
+      ├──► /arm/status (std_msgs/String)
+      ▼
+USB serial 115200 8N1 '\n'  ──►  Arduino Uno (arm_controller.ino)
 ```
 
 ---
 
-## 2. ROS 2 Interfaces
+## 2. `/arm/command`
 
-### 2.1 Command Topic: `/arm/command`
-- **Message Type**: `std_msgs/msg/String`
-- **Supported Commands**:
-  - `HOME`
-  - `BASE <angle>`
-  - `SHOULDER <angle>`
-  - `ELBOW <angle>`
-  - `WRIST <angle>`
-  - `GRIPPER OPEN`
-  - `GRIPPER CLOSE`
-- **Example Usage**:
-  ```bash
-  ros2 topic pub --once /arm/command std_msgs/msg/String "data: 'BASE 90'"
-  ros2 topic pub --once /arm/command std_msgs/msg/String "data: 'GRIPPER OPEN'"
-  ros2 topic pub --once /arm/command std_msgs/msg/String "data: 'HOME'"
-  ```
+`std_msgs/msg/String`. The verb is case-insensitive.
 
-### 2.2 Status Topic: `/arm/status`
-- **Message Type**: `std_msgs/msg/String`
-- **Status Lifecycle & Transitions**:
-  1. **Startup**: Emits `IDLE` upon successful serial/mock initialization (or `ERROR:SERIAL_CONNECTION` if connection fails).
-  2. **Execution**: Emits `EXECUTING:<ACTION>` immediately when a validated command starts (e.g. `EXECUTING:BASE`, `EXECUTING:HOME`, `EXECUTING:GRIPPER`).
-  3. **Success**: Emits `OK:<ACTION>` once Arduino acknowledges execution (e.g. `OK:BASE`, `OK:HOME`, `OK:GRIPPER`).
-  4. **Validation Rejection**: Emits `ERROR:INVALID_COMMAND` if syntax, angle limits, or parameters are invalid.
-  5. **Communication Faults**: Emits `ERROR:SERIAL_TIMEOUT`, `ERROR:ARDUINO_DISCONNECTED`, or `ERROR:SERIAL_CONNECTION`.
+| ROS command | Sent on the wire | Arduino reply |
+|---|---|---|
+| `BASE <angle>` | `BASE:<int>` | `OK:BASE` |
+| `SHOULDER <angle>` | `SHOULDER:<int>` | `OK:SHOULDER` |
+| `ELBOW <angle>` | `ELBOW:<int>` | `OK:ELBOW` |
+| `WRIST <angle>` | `WRIST:<int>` | `OK:WRIST` (wrist roll, CH3) |
+| `WRIST_PITCH <angle>` | `WRIST_PITCH:<int>` | `OK:WRIST_PITCH` (CH4) |
+| `GRIPPER OPEN` | `GRIPPER:OPEN` | `OK:GRIPPER` |
+| `GRIPPER CLOSE` | `GRIPPER:CLOSE` | `OK:GRIPPER` |
+| `HOME` | `HOME` | `OK:HOME` (firmware all-zero pose; **not limit-checked; do not send to the assembled arm**) |
 
----
+Angles may have decimals and are rounded to whole degrees before sending.
 
-## 3. Serial Communication Protocol
+```bash
+ros2 topic pub --once /arm/command std_msgs/msg/String "data: 'BASE 55'"
+ros2 topic pub --once /arm/command std_msgs/msg/String "data: 'GRIPPER OPEN'"
+```
 
-- **Baud Rate**: `115200`
-- **Line Ending**: Newline `\n` (CR `\r` safely ignored)
+### Joint limits
 
-| ROS Command | Wire Format (ROS → Arduino) | Expected Arduino Response | Final `/arm/status` |
-|---|---|---|---|
-| `HOME` | `HOME\n` | `OK:HOME\n` | `OK:HOME` |
-| `BASE 90` | `BASE:90\n` | `OK:BASE\n` | `OK:BASE` |
-| `SHOULDER 60` | `SHOULDER:60\n` | `OK:SHOULDER\n` | `OK:SHOULDER` |
-| `ELBOW 120` | `ELBOW:120\n` | `OK:ELBOW\n` | `OK:ELBOW` |
-| `WRIST 90` | `WRIST:90\n` | `OK:WRIST\n` | `OK:WRIST` |
-| `GRIPPER OPEN` | `GRIPPER:OPEN\n` | `OK:GRIPPER\n` | `OK:GRIPPER` |
-| `GRIPPER CLOSE` | `GRIPPER:CLOSE\n` | `OK:GRIPPER\n` | `OK:GRIPPER` |
+Checked before anything is sent. These are the `joint_limits.<joint>.min/max`
+parameters (defaults below), mirrored by the `ArmCommandParser` defaults.
+
+| Joint | Min | Max |
+|---|---|---|
+| base | 0 | 180 |
+| shoulder | 15 | 165 |
+| elbow | 15 | 175 |
+| wrist | 0 | 180 |
+| wrist_pitch | 0 | 180 |
+
+The elbow maximum is 175 because `PICK_DOWN_POSITION` and
+`RFID_SCAN_POSITION` use elbow = 175.
 
 ---
 
-## 4. Mock Mode
+## 3. `/arm/status`
 
-Mock mode allows full functional verification of the ROS 2 node, command parser, status broadcaster, and serial abstraction without physical hardware.
+`std_msgs/msg/String`.
 
-### Launching in Mock Mode
+| Status | When |
+|---|---|
+| `IDLE` | Node started and serial (or mock) connected |
+| `ERROR:SERIAL_CONNECTION` | Port could not be opened at startup |
+| `EXECUTING:<action>` | A valid command is being sent (`BASE`, `SHOULDER`, `ELBOW`, `WRIST`, `WRIST_PITCH`, `GRIPPER`, `HOME`) |
+| `OK:<action>` | Arduino accepted it |
+| `ERROR:INVALID_COMMAND` | Failed ROS validation (syntax, unknown verb, outside the limits; the detail, e.g. `ANGLE_OUT_OF_LIMITS:...`, is in the node log), or the Arduino rejected it |
+| `ERROR:SERIAL_TIMEOUT` | No reply line within `serial_timeout` (1 s) |
+| `ERROR:ARDUINO_DISCONNECTED` | Write or read failed, or reconnecting failed |
+| `ERROR:MALFORMED_RESPONSE:<text>` | The reply did not start with `OK` or `ERROR` |
+
+`OK` means the Arduino **accepted** the target, not that the servo has
+arrived.
+
+### Parameters
+
+| Parameter | Default |
+|---|---|
+| `mock_mode` | `false` |
+| `serial_port` | `/dev/ttyACM0` (this cell: `/dev/ttyUSB0`) |
+| `baud_rate` | `115200` |
+| `serial_timeout` | `1.0` s |
+| `joint_limits.*` | see above |
+| `home_positions.*` | `90.0`, declared but unused |
+
+The serial layer waits **2 s** after opening the port, because the Uno
+resets when it connects, then clears the input buffer. Leftover reply bytes
+are kept for the next read rather than discarded.
+
+---
+
+## 4. How `sorting_controller` drives the arm
+
+`sorting_controller` publishes one `/arm/command` at a time and waits up to
+`arm_command_timeout` (5 s) for an `OK:` or `ERROR:` on `/arm/status`.
+
+A named pose becomes five commands in this fixed order: `BASE`, `SHOULDER`,
+`ELBOW`, `WRIST`, `WRIST_PITCH`. Between them it waits `joint_gap_seconds`
+(0.6 s), and after the last one `move_settle_seconds` (2 s). After each
+gripper command it waits `gripper_settle_seconds` (1 s). At the scan pose it
+waits a further `rfid_settle_seconds` (0.5 s) before waiting for a tag.
+
+Cycle sequence:
+
+| Step | `/sorting/status` | Arm action |
+|---|---|---|
+| 1 | `CYCLE_START` | — |
+| 2 | `EXECUTING:MOVE_TO_HOME_POSITION` | `HOME_POSITION` |
+| 3 | `EXECUTING:OPEN_GRIPPER` | `GRIPPER OPEN` |
+| 4 | `EXECUTING:MOVE_TO_PICK_DOWN_POSITION` | `PICK_DOWN_POSITION` |
+| 5 | `EXECUTING:GRIP` | `GRIPPER CLOSE` |
+| 6 | `EXECUTING:LIFT_AFTER_GRIP` | `LIFT_POSITION` |
+| 7 | `EXECUTING:MOVE_TO_RFID_SCAN` | `RFID_SCAN_POSITION` + 0.5 s |
+| 8 | `WAITING_FOR_RFID` | waits up to `rfid_timeout` (15 s) |
+| 9 | `RFID_DETECTED:<uid>`, `IDENTIFIED:<name>`, `BIN_SELECTED:<bin>` | — |
+| 10 | `EXECUTING:MOVE_TO_FLOATING` | `FLOATING_POSITION` |
+| 11 | `EXECUTING:MOVE_TO_BIN:<bin>` | `<bin>_POSITION` |
+| 12 | `EXECUTING:RELEASE` | `GRIPPER OPEN` |
+| 13 | `REPORT:SORTED:<uid>:<name>:<bin>` | `HOME_POSITION` |
+| 14 | `IDLE` | — |
+
+On `ERROR:RFID_TIMEOUT`, `ERROR:UNKNOWN_UID:<uid>`, `ERROR:ARM_FAILURE:...`
+or `ERROR:INVALID_CONFIGURATION:MISSING_POSITION:...`, the controller tries
+one move to `HOME_POSITION` **without opening the gripper**, then publishes
+`IDLE`. If the final move home of a successful cycle fails, the error is
+published and the controller stops there without `IDLE`.
+
+### Current poses (`config/arm_positions.yaml`)
+
+| Pose | base | shoulder | elbow | wrist | wrist_pitch |
+|---|---|---|---|---|---|
+| `HOME_POSITION` | 0 | 105 | 95 | 100 | 90 |
+| `PICK_DOWN_POSITION` | 0 | 85 | 175 | 35 | 95 |
+| `LIFT_POSITION` (derived, not measured; works on the arm in full cycles) | 0 | 85 | 125 | 35 | 95 |
+| `RFID_SCAN_POSITION` | 55 | 90 | 175 | 0 | 100 |
+| `FLOATING_POSITION` | 55 | 110 | 155 | 15 | 100 |
+| `BIN_A_POSITION` | 85 | 110 | 155 | 15 | 100 |
+| `BIN_B_POSITION` (shoulder/wrist aligned to BIN_A, checked on the arm) | 110 | 110 | 155 | 15 | 100 |
+
+---
+
+## 5. Mock mode
+
 ```bash
 ros2 run sorting_cell arm_controller --ros-args -p mock_mode:=true
+# or the whole cell:
+ros2 launch sorting_cell sorting_cell.launch.xml mock_mode:=true
 ```
 
-### Simulated Behavior
-- No real serial port is opened.
-- The node generates simulated Arduino responses matching the protocol.
-- Example console output:
-  ```text
-  [INFO] [arm_controller]: Received command: BASE 90
-  [INFO] [arm_controller]: MOCK SERIAL -> BASE:90
-  [INFO] [arm_controller]: MOCK ARDUINO -> OK:BASE
-  ```
+No port is opened, and `SerialInterface` answers with the replies the real
+firmware would give:
+
+```text
+[INFO] [arm_controller]: Received command: BASE 90
+[INFO] [arm_controller]: MOCK SERIAL -> BASE:90
+[INFO] [arm_controller]: MOCK ARDUINO -> OK:BASE
+```
 
 ---
 
-## 5. Robust Error Handling
+## 6. Verification
 
-The node never crashes, locks up, or throws unhandled exceptions when encountering malformed commands or communication failures.
+| Item | Status |
+|---|---|
+| Serial link from the Pi to the Arduino | **Checked on hardware** |
+| All joints and the gripper moving through ROS | **Checked on hardware** |
+| PN532 reads through the `rfid_reader` node | **Checked on hardware** |
+| Full pick, scan and sort cycles into both bins | **Checked on hardware** |
+| Command parsing and joint-limit checks | Pending on hardware (unit tests only) |
+| Serial error paths (timeout, disconnect, malformed reply) | Pending on hardware (unit tests only) |
+| Recovery and failure paths of the cycle | Pending on hardware (unit tests only) |
+| Settle and joint-gap waits | Pending on hardware (unit tests only) |
+| Config loading and validation | Pending on hardware (unit tests only) |
+| Mock mode through the launch file | Pending |
 
-### Command Validation Errors
-| Input | Rejection Reason | Status Published |
-|---|---|---|
-| `BASE 999` | Angle exceeds max limit | `ERROR:INVALID_COMMAND` |
-| `BASE -50` | Angle below min limit | `ERROR:INVALID_COMMAND` |
-| `BASE hello` | Non-numeric parameter | `ERROR:INVALID_COMMAND` |
-| `BASE` | Missing angle argument | `ERROR:INVALID_COMMAND` |
-| `UNKNOWN` | Unrecognized command verb | `ERROR:INVALID_COMMAND` |
-| `GRIPPER 123` | Invalid gripper state | `ERROR:INVALID_COMMAND` |
-| `HOME extra` | Unexpected extra argument | `ERROR:INVALID_COMMAND` |
-| `""` or `"   "` | Empty / whitespace string | `ERROR:INVALID_COMMAND` |
-
-### Serial Communication Errors
-| Condition | Trigger | Status Published |
-|---|---|---|
-| Serial port unavailable | Device missing or pyserial absent | `ERROR:SERIAL_CONNECTION` |
-| Connection failure | OS denies access or port busy | `ERROR:SERIAL_CONNECTION` |
-| Serial read timeout | Arduino fails to reply within timeout (1.0s) | `ERROR:SERIAL_TIMEOUT` |
-| Arduino disconnected | Device unplugged during write or read | `ERROR:ARDUINO_DISCONNECTED` |
-| Malformed Arduino reply | Unrecognized bytes returned from Arduino | `ERROR:MALFORMED_RESPONSE:...` |
-| Arduino error response | Arduino reports invalid command | `ERROR:INVALID_COMMAND` |
-
----
-
-## 6. Verification Status Matrix
-
-To maintain rigorous project engineering integrity, testing status is explicitly categorized:
-
-| Component / Feature | Environment | Status | Details |
-|---|---|---|---|
-| Command Parsing & Limits Validation | Windows (Python 3.13) | **VERIFIED** | 35 pytest unit tests passing covering syntax, limits, boundaries |
-| Wire Protocol & Newline Termination | Windows (Python 3.13) | **VERIFIED** | 12 pytest unit tests verifying `\n` termination |
-| Mock Serial Mode & Lifecycle | Windows (Python 3.13) | **VERIFIED** | 15 pytest unit tests verifying simulation, connect/disconnect |
-| Serial Error Handling (Mocks) | Windows (Python 3.13) | **VERIFIED** | 11 pytest unit tests for timeouts, disconnects, write/read errors |
-| Full Controller Status Flow | Windows (Python 3.13) | **VERIFIED** | 23 pytest integration tests for status transitions and error flows |
-| ROS 2 Humble Package Build | Ubuntu 22.04 LTS | **PENDING** | Requires `colcon build --packages-select sorting_cell` on Ubuntu |
-| Live ROS 2 Topic Pub/Sub | Ubuntu 22.04 LTS | **PENDING** | Requires running node with live DDS middleware |
-| Arduino Uno Firmware Flashing | Arduino IDE / CLI | **PENDING** | Requires physical Arduino Uno via USB |
-| PCA9685 I2C Communication | Physical Hardware | **PENDING** | Requires physical PCA9685 wired to Arduino A4/A5 |
-| External 12V Buck Power Supply | Physical Hardware | **PENDING** | Requires high-current buck converter powering PCA9685 V+ |
-| Servo Mechanical Calibration | Physical Arm Hardware | **PENDING** | Hardware team must calibrate physical joint limits (1 → 2 → 3 → 6 servos) |
+Unit tests: `cd ros2_ws/src/sorting_cell && python3 -m pytest` (234 tests,
+Python logic only, no hardware).

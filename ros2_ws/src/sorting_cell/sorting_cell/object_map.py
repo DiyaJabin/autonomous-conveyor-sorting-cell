@@ -1,8 +1,8 @@
 """RFID UID -> object -> bin mapping for the sorting_cell subsystem.
 
 Kept deliberately free of rclpy so it can be loaded and unit tested on any
-platform. The actual UID list is data (config/object_map.yaml), never
-hard-coded here, since real RFID UIDs have not been provided yet.
+platform. The UID list is data (config/object_map.yaml), never
+hard-coded here, so tags can be added without code changes.
 """
 
 from dataclasses import dataclass

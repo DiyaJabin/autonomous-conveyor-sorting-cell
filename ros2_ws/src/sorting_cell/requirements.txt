@@ -1,13 +1,16 @@
 # Pip-only dependencies for the real (mock_mode:=false) PN532 RFID backend
 # in sorting_cell/rfid_reader.py (Pn532Backend). These are CircuitPython
 # hardware libraries, not available via rosdep/apt, so they are NOT listed
-# as <exec_depend> in package.xml -- install them directly:
+# as <exec_depend> in package.xml. Install them on the Raspberry Pi:
 #
-#   pip3 install -r requirements.txt
+#   pip3 install -r requirements.txt --break-system-packages
+#
+# (--break-system-packages is needed on Ubuntu 24.04, whose system Python
+# refuses plain pip installs.)
 #
 # adafruit-circuitpython-pn532 already depends on Adafruit-Blinka, but it
-# is listed explicitly here since Blinka is also what performs Raspberry Pi
-# board/GPIO detection -- see the note in package.xml and the summary given
-# alongside this change for Ubuntu Server-specific caveats to confirm.
+# is listed explicitly since Blinka is what performs Raspberry Pi board/GPIO
+# detection. RPi.GPIO is listed because Blinka needed it on the Pi.
 adafruit-blinka
 adafruit-circuitpython-pn532
+RPi.GPIO

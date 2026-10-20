@@ -24,10 +24,13 @@
  *    - Arduino GND MUST be connected to PCA9685 GND (Common Ground).
  *
  * 2. SERVO CALIBRATION & MECHANICAL SAFETY:
- *    - Channel mappings and pulse ranges below are UNCALIBRATED SOFTWARE PLACEHOLDERS.
- *    - The hardware team must calibrate actual mechanical limits and PCA9685 channel mappings
- *      before commanding physical servos.
+ *    - The channel map and pulse ranges below were measured on this cell's arm.
+ *      Re-check them if a servo is replaced or re-horned.
+ *    - This firmware only rejects angles outside 0-180. Per-joint limits are
+ *      enforced on the ROS side (arm_controller.py joint_limits).
  *    - Do not assume 0 or 180 degrees are mechanically safe.
+ *    - The HOME command drives every joint to 0 degrees and ignores the ROS
+ *      limits; do not send it with the arm assembled.
  *    - Test physical servos incrementally: 1 servo -> 2 servos -> 3 servos -> 6 servos.
  * =====================================================================================
  */
@@ -141,7 +144,8 @@ bool setServoAngle(
     return true;
 }
 
-// Move all joints to their configured HOME placeholder positions.
+// Firmware HOME: all joints to 0 degrees and the gripper open. This is not
+// the ROS HOME_POSITION pose, and sorting_controller never sends it.
 void executeHome() {
     setServoAngle(CH_BASE, HOME_ANGLE_BASE);
     setServoAngle(CH_SHOULDER, HOME_ANGLE_SHOULDER);

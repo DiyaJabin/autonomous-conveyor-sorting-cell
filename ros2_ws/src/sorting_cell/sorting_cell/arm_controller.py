@@ -47,10 +47,11 @@ class ArmCommandParser:
     def __init__(self, joint_limits: Optional[Dict[str, JointRange]] = None) -> None:
         """Initialize the parser with configurable joint limits.
 
-        CRITICAL SAFETY NOTICE:
-        These default values are uncalibrated software test placeholders ONLY.
-        They DO NOT represent mechanically safe limits. The hardware team will
-        provide actual safe angular limits and calibration values.
+        These defaults mirror the arm_controller node's joint_limits.*
+        parameters and are wide enough to admit every pose in
+        config/arm_positions.yaml. They are a software guard against typos,
+        not measured mechanical limits of the arm. The firmware itself only
+        rejects angles outside 0-180.
         """
         self.joint_limits: Dict[str, JointRange] = joint_limits or {
             "BASE": JointRange(min_angle=0.0, max_angle=180.0),
@@ -214,11 +215,9 @@ class ArmControllerNode(Node):
         self.declare_parameter('baud_rate', 115200)
         self.declare_parameter('serial_timeout', 1.0)
 
-        # Configurable joint limits:
-        # CRITICAL SAFETY NOTICE:
-        # These default parameter values are uncalibrated software placeholders ONLY.
-        # They DO NOT represent mechanically safe limits. The hardware team will
-        # provide actual safe limits, home positions, and calibration offsets.
+        # Configurable joint limits (degrees). Every /arm/command angle is
+        # checked against these before it is sent to the Arduino. They are a
+        # software guard, not measured mechanical limits.
         self.declare_parameter('joint_limits.base.min', 0.0)
         self.declare_parameter('joint_limits.base.max', 180.0)
         self.declare_parameter('joint_limits.shoulder.min', 15.0)
@@ -231,7 +230,9 @@ class ArmControllerNode(Node):
         self.declare_parameter('joint_limits.wrist_pitch.min', 0.0)
         self.declare_parameter('joint_limits.wrist_pitch.max', 180.0)
 
-        # Configurable home position placeholders (to be calibrated by hardware team)
+        # Declared but not read anywhere. The cycle's home pose is
+        # HOME_POSITION in config/arm_positions.yaml, and the firmware HOME
+        # command uses the firmware's own all-zero angles.
         self.declare_parameter('home_positions.base', 90.0)
         self.declare_parameter('home_positions.shoulder', 90.0)
         self.declare_parameter('home_positions.elbow', 90.0)

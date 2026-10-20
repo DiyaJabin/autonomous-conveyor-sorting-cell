@@ -1,8 +1,8 @@
 """Named arm positions for the sorting_cell subsystem.
 
 Kept deliberately free of rclpy so it can be loaded and unit tested on any
-platform. Real joint angles are data (config/arm_positions.yaml), never
-hard-coded here, since the physical cell and bin layout are not finalized.
+platform. Joint angles are data (config/arm_positions.yaml), never
+hard-coded here, so poses can be re-measured without code changes.
 """
 
 from dataclasses import dataclass

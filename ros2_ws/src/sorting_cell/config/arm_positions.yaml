@@ -4,8 +4,9 @@
 # These are REAL VALUES MEASURED ON HARDWARE (jogged on the real arm,
 # 2026-10-15; PICK_DOWN_POSITION and RFID_SCAN_POSITION re-measured
 # 2026-10-20), EXCEPT LIFT_POSITION, which is derived from
-# PICK_DOWN_POSITION, and the FLOATING_POSITION / BIN_B_POSITION joints that
-# were aligned rather than measured (see below). They are
+# PICK_DOWN_POSITION (and has since been run on the real arm in full
+# cycles), and FLOATING_POSITION, whose joints were aligned to
+# the scan and bin poses rather than measured (see below). They are
 # specific to THIS cell's physical layout (pickup area, fixed PN532 reader
 # position, bin layout). Re-verify on the arm before reusing this file for a
 # different physical setup.
@@ -49,7 +50,8 @@ positions:
     wrist: 35
     wrist_pitch: 95
 
-  # !!! DERIVED, NOT MEASURED -- must be checked on the real arm !!!
+  # DERIVED, NOT MEASURED -- but run on the real arm in full cycles and
+  # works there.
   # Lifts the gripped object clear of the pickup area right after GRIPPER
   # CLOSE, before the move to RFID_SCAN_POSITION. Values are
   # PICK_DOWN_POSITION's with only the elbow raised from 175 to 125.
@@ -93,8 +95,8 @@ positions:
 
   # base measured on the real arm 2026-10-15. shoulder and wrist were
   # aligned to BIN_A_POSITION (were 100 and 25) so the move from
-  # FLOATING_POSITION only changes the base -- still need checking on the
-  # real arm.
+  # FLOATING_POSITION only changes the base, and have since been checked
+  # on the real arm.
   BIN_B_POSITION:
     base: 110
     shoulder: 110

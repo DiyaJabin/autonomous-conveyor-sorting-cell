@@ -5,8 +5,12 @@ hardware read path is a PN532 NFC reader wired directly to the Raspberry
 Pi's I2C1 bus (/dev/i2c-1, SDA=GPIO2/pin3, SCL=GPIO3/pin5) -- not the
 Arduino -- using the adafruit-circuitpython-pn532 I2C driver (see
 Pn532Backend below). The I2C address is a ROS 2 parameter ('i2c_address'),
-never hardcoded: confirm the real address with `i2cdetect -y 1` once the
-reader is wired, since it can differ between PN532 breakout boards.
+never hardcoded. The reader in this cell answers at 0x24 (the default);
+check with `i2cdetect -y 1`, since it can differ between PN532 boards.
+
+The reader publishes a UID once when a tag enters the field. It does not
+republish the same UID while that tag stays in the field; a read with no
+tag resets this.
 
 For development and testing without the PN532 connected, publish a UID to
 /rfid/simulate and it will be forwarded (through the same debounce logic
