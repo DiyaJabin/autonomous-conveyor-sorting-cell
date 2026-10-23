@@ -1,133 +1,163 @@
-# Robotic Arm Subsystem: Arduino & PCA9685 Integration Guide
+# Arduino Uno and PCA9685 Servo Subsystem
 
-This document describes the low-level hardware control layer for the 6-DOF robotic arm subsystem of the **Autonomous Conveyor-Based Robotic Sorting Cell** (Review 2).
+The low-level servo layer of the sorting cell: `arduino/arm_controller/arm_controller.ino`
+on an Arduino Uno, driving six servos through a PCA9685 board. The Arduino
+receives text commands over USB serial from the ROS 2 `arm_controller` node
+on the Raspberry Pi (or from a serial monitor) and replies once per command.
+
+See [../hardware/WIRING.md](../hardware/WIRING.md) for the full wiring and
+power tables and [ros2_arm_controller.md](ros2_arm_controller.md) for the
+ROS side.
 
 ---
 
-## 1. System Architecture
+## 1. Architecture
 
 ```
-Ubuntu 22.04 Laptop (ROS 2 Humble)
+Raspberry Pi 4 (Ubuntu 24.04, ROS 2 Jazzy)
+       │  arm_controller node
        │
-       │  Topic: /arm/command (std_msgs/msg/String)
+       │  USB serial, 115200 baud 8N1, '\n'-terminated ASCII
        ▼
-[arm_controller node]
+Arduino Uno  (arm_controller.ino)
        │
-       │  USB Serial (115200 baud, newline-terminated ascii)
+       │  I2C, PCA9685 at 0x40, 50 Hz PWM
        ▼
-[Arduino Uno]
-       │
-       │  I2C (SDA: A4, SCL: A5 @ 50 Hz PWM)
-       ▼
-[Adafruit PCA9685 16-Channel 12-bit PWM Driver]
-       ├── CH0: BASE Servo (MG996R)
-       ├── CH1: SHOULDER Servo (MG996R)
-       ├── CH2: ELBOW Servo (MG996R)
-       ├── CH3: WRIST Servo (MG996R/MG90S)
-       ├── CH4: GRIPPER Servo (MG90S)
-       └── CH5: EXTRA/SPARE Servo (MG90S)
+PCA9685 16-channel 12-bit PWM driver  ◄── separate servo supply on V+
+       ├── CH0  Base         MG996R
+       ├── CH1  Shoulder     MG996R
+       ├── CH2  Elbow        MG996R
+       ├── CH3  Wrist roll   MG90S
+       ├── CH4  Wrist pitch  MG90S
+       └── CH5  Gripper      MG90S
 ```
 
 ---
 
-## 2. Power Architecture & Electrical Safety
+## 2. Power and wiring
 
-> [!CAUTION]
-> **CRITICAL POWER WARNING: NEVER POWER SERVOS FROM ARDUINO 5V OR USB**
-> - The 6 RC servos (3× high-torque MG996R + 3× MG90S) draw significant stall current (MG996R can draw > 2.5A each under load).
-> - Attempting to power servos from the Arduino 5V pin or USB port will cause brownouts, MCU reboots, or permanently damage USB ports on the host computer.
+> **Never power the servos from the Arduino's 5V pin or from USB.**
 
-### Safe Power Distribution
-1. **Logic Power**: The Arduino Uno is powered via the USB connection to the host computer (supplies ATmega328P MCU and PCA9685 logic `VCC`).
-2. **Servo Motor Power**: An external 12V DC power supply is stepped down via a high-current DC-DC buck converter (rated at 5V–6V, minimum 8A–10A continuous output) connected directly to the **PCA9685 V+ and GND screw terminals**.
-3. **Common Ground**: A common ground reference **MUST** be connected between the Arduino GND and PCA9685 GND.
+- The servos run from a **separate supply** into the PCA9685 **V+** screw terminal.
+- That supply's ground is **shared** with the PCA9685 and the Arduino.
+- Use a supply with **several amps of headroom**. A USB power bank caused shaking and stalling during testing.
+- The Arduino is powered and talks over USB from the Pi.
 
-### Pinout Connections
-
-| Arduino Uno Pin | PCA9685 Pin | Description |
+| Arduino Uno | PCA9685 | Notes |
 |---|---|---|
-| `5V` | `VCC` | Logic power supply (+5V) |
-| `GND` | `GND` | Common ground reference |
-| `A4` | `SDA` | I2C Data line |
-| `A5` | `SCL` | I2C Clock line |
-| *(External Buck 5V-6V)* | `V+ (Screw Terminal)` | Dedicated servo motor power |
-| *(External Buck GND)* | `GND (Screw Terminal)` | Dedicated servo motor ground |
+| SDA (A4) | SDA | Uno hardware I2C. **Confirm against your build.** |
+| SCL (A5) | SCL | **Confirm against your build.** |
+| GND | GND | Required (common ground) |
+| 5V | VCC (logic) | Logic power only. **Confirm against your build.** |
+| | V+ / GND screw terminal | Separate servo supply |
 
 ---
 
-## 3. Serial Communication Protocol
+## 3. Channel map and calibration
 
-- **Baud Rate**: `115200`
-- **Data Format**: 8 data bits, no parity, 1 stop bit (8N1)
-- **Line Ending**: Newline `\n` (CR `\r` is safely ignored)
+From the `CH_*` constants and `SERVO_CALIBRATION` in the firmware. Pulses
+are PCA9685 counts (4096 per 20 ms period at 50 Hz).
 
-### Command Set (ROS 2 → Arduino)
+| Channel | Joint | Servo | Command | Min (0°) | Mid (90°) | Max (180°) |
+|---|---|---|---|---|---|---|
+| CH0 | Base | MG996R | `BASE` | 100 | 310 | 520 |
+| CH1 | Shoulder | MG996R | `SHOULDER` | 100 | 310 | 520 |
+| CH2 | Elbow | MG996R | `ELBOW` | 100 | 310 | 520 |
+| CH3 | Wrist roll | MG90S | `WRIST` | 87 | 313 | 538 |
+| CH4 | Wrist pitch | MG90S | `WRIST_PITCH` | 87 | 313 | 538 |
+| CH5 | Gripper | MG90S | `GRIPPER` | 87 | 311 | 535 |
 
-| Command | Example | Description |
-|---|---|---|
-| `HOME` | `HOME\n` | Moves all joints to configured software home positions |
-| `BASE:<angle>` | `BASE:90\n` | Commands the base rotation joint to target angle |
-| `SHOULDER:<angle>` | `SHOULDER:60\n` | Commands the shoulder joint to target angle |
-| `ELBOW:<angle>` | `ELBOW:120\n` | Commands the elbow joint to target angle |
-| `WRIST:<angle>` | `WRIST:90\n` | Commands the wrist joint to target angle |
-| `GRIPPER:OPEN` | `GRIPPER:OPEN\n` | Sets gripper jaws to open angle |
-| `GRIPPER:CLOSE` | `GRIPPER:CLOSE\n` | Sets gripper jaws to closed angle |
+`angleToPwmCount()` interpolates linearly from 0° to 90° (min to mid) and
+from 90° to 180° (mid to max).
 
-### Response Set (Arduino → ROS 2)
-
-| Response | Meaning |
+| Constant | Value |
 |---|---|
-| `OK:HOME` | Homing sequence executed successfully |
-| `OK:BASE` | Base angle command executed |
-| `OK:SHOULDER` | Shoulder angle command executed |
-| `OK:ELBOW` | Elbow angle command executed |
-| `OK:WRIST` | Wrist angle command executed |
-| `OK:GRIPPER` | Gripper state command executed |
-| `ERROR:INVALID_COMMAND` | Malformed syntax, unknown target, or non-numeric value received |
+| `GRIPPER_OPEN_ANGLE` | 150° |
+| `GRIPPER_CLOSE_ANGLE` | 20° |
+| `HOME_ANGLE_*` (all five joints) | 0° |
+| PWM frequency | 50 Hz (oscillator set to 27 MHz) |
 
 ---
 
-## 4. PCA9685 Servo Channel Mapping
+## 4. Serial protocol
 
-> [!IMPORTANT]
-> The channel assignments below are **uncalibrated software placeholders**. The physical hardware team must verify actual wiring before enabling servo power.
+- 115200 baud, 8N1.
+- One command per line, terminated by `\n`. A `\r` is discarded, and leading and trailing spaces and tabs are trimmed.
+- The buffer holds 63 characters. A longer line is answered with `ERROR:INVALID_COMMAND`.
+- The reply is sent as soon as the servo target is set, **before the servo has physically moved**. The ROS side adds settle waits for this reason.
 
-| Channel | Joint Name | Servo Model | Placeholder Defaults | Calibrated Limits (Hardware Team) |
-|---|---|---|---|---|
-| `0` | Base | MG996R | `0° – 180°`, Home: `90°` | *TBD by Hardware Team* |
-| `1` | Shoulder | MG996R | `15° – 165°`, Home: `90°` | *TBD by Hardware Team* |
-| `2` | Elbow | MG996R | `15° – 165°`, Home: `90°` | *TBD by Hardware Team* |
-| `3` | Wrist | MG90S / MG996R | `0° – 180°`, Home: `90°` | *TBD by Hardware Team* |
-| `4` | Gripper | MG90S | Open: `30°`, Close: `90°` | *TBD by Hardware Team* |
-| `5` | Spare / Aux | MG90S | Home: `90°` | *TBD by Hardware Team* |
+| Command | Reply | Effect |
+|---|---|---|
+| `BASE:<angle>` | `OK:BASE` | CH0 |
+| `SHOULDER:<angle>` | `OK:SHOULDER` | CH1 |
+| `ELBOW:<angle>` | `OK:ELBOW` | CH2 |
+| `WRIST:<angle>` | `OK:WRIST` | CH3, wrist roll |
+| `WRIST_PITCH:<angle>` | `OK:WRIST_PITCH` | CH4, wrist pitch |
+| `GRIPPER:OPEN` | `OK:GRIPPER` | CH5 to 150° |
+| `GRIPPER:CLOSE` | `OK:GRIPPER` | CH5 to 20° |
+| `HOME` | `OK:HOME` | All five joints to 0° and the gripper open |
+
+`<angle>` is any number from 0 to 180 (parsed with `strtod`).
+
+The only error reply is `ERROR:INVALID_COMMAND`. It is returned for an empty
+line, a missing `:` or value, an unknown target, a gripper value other than
+`OPEN`/`CLOSE`, a non-numeric angle or trailing characters, an angle outside
+0–180, and a line that overflows the buffer.
+
+The firmware applies **no per-joint limits** beyond 0–180. The joint limits
+(for example elbow 15–175) are enforced by the ROS `arm_controller` node.
+
+### Firmware HOME vs ROS HOME_POSITION
+
+The firmware `HOME` command drives every joint to 0°, which is outside the
+ROS shoulder and elbow limits (minimum 15). The sorting cycle never sends it.
+Instead it moves to the measured `HOME_POSITION` pose from
+`config/arm_positions.yaml`, one joint at a time. **Do not send `HOME` to the
+assembled arm.**
+
+### Boot behaviour
+
+- `setup()` starts serial, then I2C and the PCA9685, then waits 10 ms. **Servos are not moved on power-up or reset.**
+- Opening the serial port resets the Uno (DTR). The Python `SerialInterface` therefore waits **2 s** (`boot_delay`) after opening the port, then clears the input buffer before sending the first command.
 
 ---
 
-## 5. Incremental Hardware Bring-Up Checklist
+## 5. Flashing
 
-To prevent mechanical damage, do **NOT** power all 6 servos at once. Follow this gradual bring-up procedure:
+From the repository root, on the machine the Arduino is plugged into (stop
+any ROS launch or serial monitor first):
 
-1. **Step 1: Serial Interface Loopback Test (No Servos, No External Power)**
-   - Connect Arduino Uno via USB to PC.
-   - Open Arduino IDE Serial Monitor (115200 baud, newline `\n`).
-   - Send `BASE:90` → Verify response: `OK:BASE`.
-   - Send `GRIPPER:OPEN` → Verify response: `OK:GRIPPER`.
-   - Send `BASE:INVALID` → Verify response: `ERROR:INVALID_COMMAND`.
+```bash
+arduino-cli core update-index
+arduino-cli core install arduino:avr
+arduino-cli lib install "Adafruit PWM Servo Driver Library"
+arduino-cli compile --fqbn arduino:avr:uno arduino/arm_controller
+arduino-cli upload -p /dev/ttyUSB0 --fqbn arduino:avr:uno arduino/arm_controller
+```
 
-2. **Step 2: Single Servo Test (1 Servo)**
-   - Connect external 5V/6V supply to PCA9685 screw terminals.
-   - Plug **1 servo only** into Channel 0 (Base).
-   - Send `BASE:90` → Confirm smooth servo motion without jitter or brownout.
+Any change to the calibration, gripper angles or protocol needs a re-flash.
 
-3. **Step 3: Two Servos Test (2 Servos)**
-   - Add second servo on Channel 1 (Shoulder).
-   - Test commanding Base and Shoulder independently.
+---
 
-4. **Step 4: Three Servos Test (3 Servos)**
-   - Add third servo on Channel 2 (Elbow).
-   - Check current draw on power supply when moving arm joints.
+## 6. Manual jogging and re-measuring poses
 
-5. **Step 5: Full 6-Servo Arm Assembly**
-   - Connect remaining wrist and gripper servos (Channels 3, 4, 5).
-   - Record true mechanical minimum, maximum, and home angles for calibration.
-   - Update ROS 2 launch parameters with verified physical limits.
+1. Stop the ROS launch, since only one program can hold the port.
+2. Open a serial monitor at 115200 baud with newline line endings.
+3. Send one joint at a time in small steps, e.g. `BASE:55`, then `SHOULDER:90`. Expect `OK:<JOINT>`.
+4. Never send `HOME`.
+5. Record base, shoulder, elbow, wrist and wrist pitch, keep them inside the ROS joint limits, and enter them in `config/arm_positions.yaml`. Rebuild the package afterwards.
+
+Bring-up order for a fresh or rebuilt arm: start with one servo, then two,
+then three, then all six, checking the supply each time.
+
+---
+
+## 7. Verification
+
+| Item | Status |
+|---|---|
+| Serial link from the Pi to the Arduino | **Checked on hardware** |
+| All joints and the gripper moving through ROS | **Checked on hardware** |
+| Full pick, scan and sort cycles into both bins | **Checked on hardware** |
+| Firmware `HOME` on the assembled arm | Pending (deliberately not used) |
+| Per-joint speed smoothing | Not implemented: servos are set straight to their target and move at full speed |

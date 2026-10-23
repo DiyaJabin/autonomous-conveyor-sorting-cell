@@ -33,6 +33,8 @@ class TestArmCommandParserValid:
         ("ELBOW 120", "ELBOW:120", "ELBOW"),
         ("WRIST 90", "WRIST:90", "WRIST"),
         ("wrist 180", "WRIST:180", "WRIST"),
+        ("WRIST_PITCH 90", "WRIST_PITCH:90", "WRIST_PITCH"),
+        ("wrist_pitch 45", "WRIST_PITCH:45", "WRIST_PITCH"),
         ("  BASE   90  ", "BASE:90", "BASE"),
         ("BASE 90.0", "BASE:90", "BASE"),
         ("ELBOW 120.4", "ELBOW:120", "ELBOW"),
@@ -60,6 +62,9 @@ class TestArmCommandParserInvalid:
         ("SHOULDER", "MISSING_OR_EXTRA_ANGLE_ARGUMENT"),
         ("ELBOW", "MISSING_OR_EXTRA_ANGLE_ARGUMENT"),
         ("WRIST", "MISSING_OR_EXTRA_ANGLE_ARGUMENT"),
+        ("WRIST_PITCH", "MISSING_OR_EXTRA_ANGLE_ARGUMENT"),
+        ("WRIST_PITCH 999", "ANGLE_OUT_OF_LIMITS"),
+        ("WRIST_PITCH hello", "NON_NUMERIC_ANGLE"),
         ("BASE 999", "ANGLE_OUT_OF_LIMITS"),
         ("BASE -50", "ANGLE_OUT_OF_LIMITS"),
         ("BASE hello", "NON_NUMERIC_ANGLE"),
@@ -258,7 +263,7 @@ class TestRealSerialMockedPaths:
 
     def test_real_serial_unavailable_without_pyserial(self):
         with patch('sorting_cell.serial_interface.SERIAL_AVAILABLE', False):
-            ser = SerialInterface(port='/dev/ttyACM0', mock_mode=False)
+            ser = SerialInterface(port='/dev/ttyACM0', mock_mode=False, boot_delay=0)
             connected, status = ser.connect()
             assert connected is False
             assert status == "ERROR:SERIAL_UNAVAILABLE"
@@ -270,7 +275,7 @@ class TestRealSerialMockedPaths:
 
         with patch('sorting_cell.serial_interface.SERIAL_AVAILABLE', True), \
              patch('sorting_cell.serial_interface.serial', mock_serial_mod):
-            ser = SerialInterface(port='/dev/ttyACM0', mock_mode=False)
+            ser = SerialInterface(port='/dev/ttyACM0', mock_mode=False, boot_delay=0)
             connected, status = ser.connect()
             assert connected is False
             assert status == "ERROR:SERIAL_CONNECTION"
@@ -280,12 +285,12 @@ class TestRealSerialMockedPaths:
         mock_serial_mod = MagicMock()
         mock_instance = MagicMock()
         mock_instance.is_open = True
-        mock_instance.readline.return_value = b"OK:BASE\n"
+        mock_instance.read.return_value = b"OK:BASE\n"
         mock_serial_mod.Serial.return_value = mock_instance
 
         with patch('sorting_cell.serial_interface.SERIAL_AVAILABLE', True), \
              patch('sorting_cell.serial_interface.serial', mock_serial_mod):
-            ser = SerialInterface(port='/dev/ttyACM0', mock_mode=False)
+            ser = SerialInterface(port='/dev/ttyACM0', mock_mode=False, boot_delay=0)
             connected, _ = ser.connect()
             assert connected is True
 
@@ -298,12 +303,12 @@ class TestRealSerialMockedPaths:
         mock_serial_mod = MagicMock()
         mock_instance = MagicMock()
         mock_instance.is_open = True
-        mock_instance.readline.return_value = b""  # pyserial returns empty bytes on timeout
+        mock_instance.read.return_value = b""  # pyserial returns empty bytes on timeout
         mock_serial_mod.Serial.return_value = mock_instance
 
         with patch('sorting_cell.serial_interface.SERIAL_AVAILABLE', True), \
              patch('sorting_cell.serial_interface.serial', mock_serial_mod):
-            ser = SerialInterface(port='/dev/ttyACM0', mock_mode=False)
+            ser = SerialInterface(port='/dev/ttyACM0', mock_mode=False, boot_delay=0)
             ser.connect()
 
             success, response = ser.send_and_receive("BASE:90")
@@ -319,7 +324,7 @@ class TestRealSerialMockedPaths:
 
         with patch('sorting_cell.serial_interface.SERIAL_AVAILABLE', True), \
              patch('sorting_cell.serial_interface.serial', mock_serial_mod):
-            ser = SerialInterface(port='/dev/ttyACM0', mock_mode=False)
+            ser = SerialInterface(port='/dev/ttyACM0', mock_mode=False, boot_delay=0)
             ser.connect()
 
             success, response = ser.send_and_receive("BASE:90")
@@ -331,12 +336,12 @@ class TestRealSerialMockedPaths:
         mock_serial_mod = MagicMock()
         mock_instance = MagicMock()
         mock_instance.is_open = True
-        mock_instance.readline.side_effect = Exception("Hardware unplugged during read")
+        mock_instance.read.side_effect = Exception("Hardware unplugged during read")
         mock_serial_mod.Serial.return_value = mock_instance
 
         with patch('sorting_cell.serial_interface.SERIAL_AVAILABLE', True), \
              patch('sorting_cell.serial_interface.serial', mock_serial_mod):
-            ser = SerialInterface(port='/dev/ttyACM0', mock_mode=False)
+            ser = SerialInterface(port='/dev/ttyACM0', mock_mode=False, boot_delay=0)
             ser.connect()
 
             success, response = ser.send_and_receive("BASE:90")
@@ -348,12 +353,12 @@ class TestRealSerialMockedPaths:
         mock_serial_mod = MagicMock()
         mock_instance = MagicMock()
         mock_instance.is_open = True
-        mock_instance.readline.return_value = b"UNKNOWN_GARBAGE\n"
+        mock_instance.read.return_value = b"UNKNOWN_GARBAGE\n"
         mock_serial_mod.Serial.return_value = mock_instance
 
         with patch('sorting_cell.serial_interface.SERIAL_AVAILABLE', True), \
              patch('sorting_cell.serial_interface.serial', mock_serial_mod):
-            ser = SerialInterface(port='/dev/ttyACM0', mock_mode=False)
+            ser = SerialInterface(port='/dev/ttyACM0', mock_mode=False, boot_delay=0)
             ser.connect()
 
             success, response = ser.send_and_receive("BASE:90")
@@ -364,12 +369,12 @@ class TestRealSerialMockedPaths:
         mock_serial_mod = MagicMock()
         mock_instance = MagicMock()
         mock_instance.is_open = True
-        mock_instance.readline.return_value = b"ERROR:INVALID_COMMAND\n"
+        mock_instance.read.return_value = b"ERROR:INVALID_COMMAND\n"
         mock_serial_mod.Serial.return_value = mock_instance
 
         with patch('sorting_cell.serial_interface.SERIAL_AVAILABLE', True), \
              patch('sorting_cell.serial_interface.serial', mock_serial_mod):
-            ser = SerialInterface(port='/dev/ttyACM0', mock_mode=False)
+            ser = SerialInterface(port='/dev/ttyACM0', mock_mode=False, boot_delay=0)
             ser.connect()
 
             success, response = ser.send_and_receive("BASE:90")
@@ -384,7 +389,7 @@ class TestRealSerialMockedPaths:
 
         with patch('sorting_cell.serial_interface.SERIAL_AVAILABLE', True), \
              patch('sorting_cell.serial_interface.serial', mock_serial_mod):
-            ser = SerialInterface(port='/dev/ttyACM0', mock_mode=False)
+            ser = SerialInterface(port='/dev/ttyACM0', mock_mode=False, boot_delay=0)
             ser.connect()
             assert ser.is_connected is True
 
@@ -395,6 +400,57 @@ class TestRealSerialMockedPaths:
             # Calling again should be safe and not re-call close
             ser.disconnect()
             assert ser.is_connected is False
+
+    def test_real_serial_splits_concatenated_responses(self):
+        """Regression test for the real-hardware fragmentation bug.
+
+        On real hardware, two full 'OK:<JOINT>\\r\\n' responses can land in
+        the same underlying serial read chunk when commands are issued back
+        to back (e.g. a multi-joint move). The interface must return only
+        the first complete response for the command that triggered it and
+        keep the rest buffered for the next command -- it must not require
+        another physical read, and it must not corrupt or drop either line.
+        """
+        mock_serial_mod = MagicMock()
+        mock_instance = MagicMock()
+        mock_instance.is_open = True
+        mock_instance.read.return_value = b"OK:BASE\r\nOK:SHOULDER\r\n"
+        mock_serial_mod.Serial.return_value = mock_instance
+
+        with patch('sorting_cell.serial_interface.SERIAL_AVAILABLE', True), \
+             patch('sorting_cell.serial_interface.serial', mock_serial_mod):
+            ser = SerialInterface(port='/dev/ttyACM0', mock_mode=False, boot_delay=0)
+            ser.connect()
+
+            success, response = ser.send_and_receive("BASE:0")
+            assert success is True
+            assert response == "OK:BASE"
+
+            # Nothing new arrives on the wire for the second command -- the
+            # correct response must already be sitting in the buffer from
+            # the first read.
+            mock_instance.read.return_value = b""
+            success, response = ser.send_and_receive("SHOULDER:120")
+            assert success is True
+            assert response == "OK:SHOULDER"
+
+    def test_real_serial_boot_delay_before_first_command(self):
+        """Opening the port resets an Arduino Uno via DTR; the interface must
+        wait for it to finish booting, and clear any boot-noise bytes it
+        emitted, before the first command can be sent."""
+        mock_serial_mod = MagicMock()
+        mock_instance = MagicMock()
+        mock_instance.is_open = True
+        mock_serial_mod.Serial.return_value = mock_instance
+
+        with patch('sorting_cell.serial_interface.SERIAL_AVAILABLE', True), \
+             patch('sorting_cell.serial_interface.serial', mock_serial_mod), \
+             patch('sorting_cell.serial_interface.time.sleep') as mock_sleep:
+            ser = SerialInterface(port='/dev/ttyACM0', mock_mode=False, boot_delay=2.5)
+            ser.connect()
+
+            mock_sleep.assert_called_once_with(2.5)
+            mock_instance.reset_input_buffer.assert_called_once()
 
 
 class TestArmControllerCoreIntegration:
@@ -421,6 +477,7 @@ class TestArmControllerCoreIntegration:
         ("SHOULDER 60", ["EXECUTING:SHOULDER", "OK:SHOULDER"]),
         ("ELBOW 120", ["EXECUTING:ELBOW", "OK:ELBOW"]),
         ("WRIST 90", ["EXECUTING:WRIST", "OK:WRIST"]),
+        ("WRIST_PITCH 45", ["EXECUTING:WRIST_PITCH", "OK:WRIST_PITCH"]),
         ("GRIPPER OPEN", ["EXECUTING:GRIPPER", "OK:GRIPPER"]),
         ("GRIPPER CLOSE", ["EXECUTING:GRIPPER", "OK:GRIPPER"]),
         ("HOME", ["EXECUTING:HOME", "OK:HOME"]),
@@ -468,7 +525,7 @@ class TestArmControllerCoreIntegration:
 
         with patch('sorting_cell.serial_interface.SERIAL_AVAILABLE', True), \
              patch('sorting_cell.serial_interface.serial', mock_serial_mod):
-            real_ser = SerialInterface(port='/dev/ttyACM0', mock_mode=False)
+            real_ser = SerialInterface(port='/dev/ttyACM0', mock_mode=False, boot_delay=0)
             real_ser.connect()
             ctrl = ArmControllerCore(parser=self.parser, serial_interface=real_ser)
             final_status = ctrl.process_command("BASE 90")
@@ -479,12 +536,12 @@ class TestArmControllerCoreIntegration:
         mock_serial_mod = MagicMock()
         mock_instance = MagicMock()
         mock_instance.is_open = True
-        mock_instance.readline.side_effect = Exception("USB read error")
+        mock_instance.read.side_effect = Exception("USB read error")
         mock_serial_mod.Serial.return_value = mock_instance
 
         with patch('sorting_cell.serial_interface.SERIAL_AVAILABLE', True), \
              patch('sorting_cell.serial_interface.serial', mock_serial_mod):
-            real_ser = SerialInterface(port='/dev/ttyACM0', mock_mode=False)
+            real_ser = SerialInterface(port='/dev/ttyACM0', mock_mode=False, boot_delay=0)
             real_ser.connect()
             ctrl = ArmControllerCore(parser=self.parser, serial_interface=real_ser)
             final_status = ctrl.process_command("BASE 90")
@@ -495,12 +552,12 @@ class TestArmControllerCoreIntegration:
         mock_serial_mod = MagicMock()
         mock_instance = MagicMock()
         mock_instance.is_open = True
-        mock_instance.readline.return_value = b"CORRUPTED_SERIAL_STREAM\n"
+        mock_instance.read.return_value = b"CORRUPTED_SERIAL_STREAM\n"
         mock_serial_mod.Serial.return_value = mock_instance
 
         with patch('sorting_cell.serial_interface.SERIAL_AVAILABLE', True), \
              patch('sorting_cell.serial_interface.serial', mock_serial_mod):
-            real_ser = SerialInterface(port='/dev/ttyACM0', mock_mode=False)
+            real_ser = SerialInterface(port='/dev/ttyACM0', mock_mode=False, boot_delay=0)
             real_ser.connect()
             ctrl = ArmControllerCore(parser=self.parser, serial_interface=real_ser)
             final_status = ctrl.process_command("BASE 90")
@@ -511,15 +568,33 @@ class TestArmControllerCoreIntegration:
         mock_serial_mod = MagicMock()
         mock_instance = MagicMock()
         mock_instance.is_open = True
-        mock_instance.readline.return_value = b"ERROR:INVALID_COMMAND\n"
+        mock_instance.read.return_value = b"ERROR:INVALID_COMMAND\n"
         mock_serial_mod.Serial.return_value = mock_instance
 
         with patch('sorting_cell.serial_interface.SERIAL_AVAILABLE', True), \
              patch('sorting_cell.serial_interface.serial', mock_serial_mod):
-            real_ser = SerialInterface(port='/dev/ttyACM0', mock_mode=False)
+            real_ser = SerialInterface(port='/dev/ttyACM0', mock_mode=False, boot_delay=0)
             real_ser.connect()
             ctrl = ArmControllerCore(parser=self.parser, serial_interface=real_ser)
             final_status = ctrl.process_command("BASE 90")
             assert ctrl.status_history == ["EXECUTING:BASE", "ERROR:INVALID_COMMAND"]
             assert final_status == "ERROR:INVALID_COMMAND"
 
+
+
+class TestShippedPositionsWithinDefaultLimits:
+    """Every measured position in config/arm_positions.yaml must pass the default
+    ArmCommandParser limits, or the real arm rejects it at runtime."""
+
+    def test_all_shipped_positions_pass_default_limits(self):
+        from sorting_cell.positions import load_positions
+
+        positions = load_positions(str(pkg_root / "config" / "arm_positions.yaml"))
+        parser = ArmCommandParser()
+        failures = []
+        for name, position in positions.items():
+            for command in position.as_commands():
+                is_valid, _, _, error = parser.parse(command)
+                if not is_valid:
+                    failures.append(f"{name}: '{command}' -> {error}")
+        assert not failures, "\n".join(failures)

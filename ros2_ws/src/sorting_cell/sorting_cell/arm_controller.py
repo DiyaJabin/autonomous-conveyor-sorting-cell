@@ -41,22 +41,26 @@ class ArmCommandParser:
     Never crashes on malformed or out-of-range input.
     """
 
-    SUPPORTED_JOINTS = ("BASE", "SHOULDER", "ELBOW", "WRIST")
+    SUPPORTED_JOINTS = ("BASE", "SHOULDER", "ELBOW", "WRIST", "WRIST_PITCH")
     VALID_GRIPPER_STATES = ("OPEN", "CLOSE")
 
     def __init__(self, joint_limits: Optional[Dict[str, JointRange]] = None) -> None:
         """Initialize the parser with configurable joint limits.
 
-        CRITICAL SAFETY NOTICE:
-        These default values are uncalibrated software test placeholders ONLY.
-        They DO NOT represent mechanically safe limits. The hardware team will
-        provide actual safe angular limits and calibration values.
+        These defaults mirror the arm_controller node's joint_limits.*
+        parameters and are wide enough to admit every pose in
+        config/arm_positions.yaml. They are a software guard against typos,
+        not measured mechanical limits of the arm. The firmware itself only
+        rejects angles outside 0-180.
         """
         self.joint_limits: Dict[str, JointRange] = joint_limits or {
             "BASE": JointRange(min_angle=0.0, max_angle=180.0),
             "SHOULDER": JointRange(min_angle=15.0, max_angle=165.0),
-            "ELBOW": JointRange(min_angle=15.0, max_angle=165.0),
+            # ELBOW max widened to 175.0 to admit the measured positions in
+            # config/arm_positions.yaml (PICK_DOWN/RFID_SCAN elbow=175).
+            "ELBOW": JointRange(min_angle=15.0, max_angle=175.0),
             "WRIST": JointRange(min_angle=0.0, max_angle=180.0),
+            "WRIST_PITCH": JointRange(min_angle=0.0, max_angle=180.0),
         }
 
     def update_joint_limit(self, joint_name: str, min_angle: float, max_angle: float) -> None:
@@ -98,7 +102,8 @@ class ArmCommandParser:
                 return False, None, None, f"INVALID_GRIPPER_STATE:{tokens[1]}"
             return True, f"GRIPPER:{state}", "GRIPPER", None
 
-        # 3. Joint angle commands: BASE <angle>, SHOULDER <angle>, ELBOW <angle>, WRIST <angle>
+        # 3. Joint angle commands: BASE <angle>, SHOULDER <angle>, ELBOW <angle>,
+        #    WRIST <angle>, WRIST_PITCH <angle>
         if verb in self.SUPPORTED_JOINTS:
             if len(tokens) != 2:
                 return False, None, None, f"MISSING_OR_EXTRA_ANGLE_ARGUMENT_FOR_{verb}"
@@ -210,25 +215,29 @@ class ArmControllerNode(Node):
         self.declare_parameter('baud_rate', 115200)
         self.declare_parameter('serial_timeout', 1.0)
 
-        # Configurable joint limits:
-        # CRITICAL SAFETY NOTICE:
-        # These default parameter values are uncalibrated software placeholders ONLY.
-        # They DO NOT represent mechanically safe limits. The hardware team will
-        # provide actual safe limits, home positions, and calibration offsets.
+        # Configurable joint limits (degrees). Every /arm/command angle is
+        # checked against these before it is sent to the Arduino. They are a
+        # software guard, not measured mechanical limits.
         self.declare_parameter('joint_limits.base.min', 0.0)
         self.declare_parameter('joint_limits.base.max', 180.0)
         self.declare_parameter('joint_limits.shoulder.min', 15.0)
         self.declare_parameter('joint_limits.shoulder.max', 165.0)
         self.declare_parameter('joint_limits.elbow.min', 15.0)
-        self.declare_parameter('joint_limits.elbow.max', 165.0)
+        # elbow.max must cover the measured positions in config/arm_positions.yaml.
+        self.declare_parameter('joint_limits.elbow.max', 175.0)
         self.declare_parameter('joint_limits.wrist.min', 0.0)
         self.declare_parameter('joint_limits.wrist.max', 180.0)
+        self.declare_parameter('joint_limits.wrist_pitch.min', 0.0)
+        self.declare_parameter('joint_limits.wrist_pitch.max', 180.0)
 
-        # Configurable home position placeholders (to be calibrated by hardware team)
+        # Declared but not read anywhere. The cycle's home pose is
+        # HOME_POSITION in config/arm_positions.yaml, and the firmware HOME
+        # command uses the firmware's own all-zero angles.
         self.declare_parameter('home_positions.base', 90.0)
         self.declare_parameter('home_positions.shoulder', 90.0)
         self.declare_parameter('home_positions.elbow', 90.0)
         self.declare_parameter('home_positions.wrist', 90.0)
+        self.declare_parameter('home_positions.wrist_pitch', 90.0)
 
         # Retrieve parameters
         self.mock_mode = self.get_parameter('mock_mode').get_parameter_value().bool_value
@@ -253,6 +262,10 @@ class ArmControllerNode(Node):
             "WRIST": JointRange(
                 self.get_parameter('joint_limits.wrist.min').get_parameter_value().double_value,
                 self.get_parameter('joint_limits.wrist.max').get_parameter_value().double_value,
+            ),
+            "WRIST_PITCH": JointRange(
+                self.get_parameter('joint_limits.wrist_pitch.min').get_parameter_value().double_value,
+                self.get_parameter('joint_limits.wrist_pitch.max').get_parameter_value().double_value,
             ),
         }
 

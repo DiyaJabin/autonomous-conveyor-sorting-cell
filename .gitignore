@@ -1,7 +1,8 @@
-# ROS 2 build artifacts
-ros2_ws/build/
-ros2_ws/install/
-ros2_ws/log/
+# ROS 2 / colcon build artifacts (at any level, e.g. if colcon is run from
+# the repo root instead of ros2_ws/)
+build/
+install/
+log/
 
 # Python
 __pycache__/
@@ -9,7 +10,6 @@ __pycache__/
 *$py.class
 *.egg-info/
 dist/
-build/
 .pytest_cache/
 
 # Arduino

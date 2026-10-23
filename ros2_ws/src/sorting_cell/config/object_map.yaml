@@ -1,0 +1,30 @@
+# =====================================================================================
+# RFID UID -> Object -> Bin mapping
+# =====================================================================================
+# Real NTAG213 UIDs, as reported by the PN532 (uppercase hex string, no
+# separators). Several UIDs may map to the same bin.
+#
+# "bin" must match a *_POSITION name defined in arm_positions.yaml (minus the
+# _POSITION suffix), e.g. bin: BIN_A -> BIN_A_POSITION.
+# =====================================================================================
+
+objects:
+  1DF058BA141080:
+    object_name: OBJECT_A2
+    bin: BIN_A
+
+  1DEF58BA141080:
+    object_name: OBJECT_A3
+    bin: BIN_A
+
+  1DEC58BA141080:
+    object_name: OBJECT_B2
+    bin: BIN_B
+
+  1DEE58BA141080:
+    object_name: OBJECT_B3
+    bin: BIN_B
+
+  1DED58BA141080:
+    object_name: OBJECT_B4
+    bin: BIN_B

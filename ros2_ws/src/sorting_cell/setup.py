@@ -11,7 +11,9 @@ setup(
         ['resource/' + package_name]),
     ('share/' + package_name, ['package.xml']),
     ('share/' + package_name + '/launch',
-        ['launch/arm.launch.xml']),
+        ['launch/arm.launch.xml', 'launch/sorting_cell.launch.xml']),
+    ('share/' + package_name + '/config',
+        ['config/object_map.yaml', 'config/arm_positions.yaml']),
     ],
     install_requires=['setuptools'],
     zip_safe=True,
@@ -23,6 +25,8 @@ setup(
     entry_points={
         'console_scripts': [
             'arm_controller = sorting_cell.arm_controller:main',
+            'rfid_reader = sorting_cell.rfid_reader:main',
+            'sorting_controller = sorting_cell.sorting_controller:main',
         ],
     },
 )
